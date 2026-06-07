@@ -411,7 +411,6 @@
                 <div class="loading">
                     <div class="spinner"></div>
                     <p style="margin-top: 16px;">Loading questions...</p>
-                    <p id="loadProgress">0%</p>
                 </div>
             </div>
             
@@ -433,24 +432,9 @@
     
     <script>
         // ==================== CONFIGURATION ====================
-        //const API_URL = "YOUR_APPS_SCRIPT_URL_HERE"; // REPLACE THIS!
-        const API_URL = "https://script.google.com/macros/library/d/1rlh9rVVEfJbI5zM3rXzbWJ9pxOfZrbCL03SL0sMZ5ZRlXC9U8ZlJZkHQ/2";
-        
-        // Test connection on page load
-window.addEventListener('load', async function() {
-    try {
-        const testResponse = await fetch(API_URL + '?action=total');
-        const testData = await testResponse.json();
-        console.log('Connection test:', testData);
-        if (testData.success) {
-            console.log('✅ Connected! Total questions:', testData.total);
-        } else {
-            console.log('❌ Connection failed');
-        }
-    } catch(error) {
-        console.error('❌ Connection error:', error);
-    }
-});
+        // IMPORTANT: Replace this URL with your actual Google Apps Script Web App URL
+        // Make sure to use HTTPS and deploy as "Anyone" or "Anyone with link"
+        const API_URL = "YOUR_APPS_SCRIPT_WEB_APP_URL_HERE";
         const QUESTIONS_PER_PAGE = 10;
         const TIME_LIMIT_SECONDS = 1800; // 30 minutes
         
@@ -510,56 +494,42 @@ window.addEventListener('load', async function() {
                 
                 if (data.success) {
                     studentInfo = { name, id };
-                    await loadTotalQuestions();
                     await loadAllQuestions();
                     initializeExam();
                 } else {
-                    showError(data.message);
+                    showError(data.message || 'Registration failed');
                 }
             } catch (error) {
-                showError('Connection error. Please check your internet and try again.');
                 console.error('Registration error:', error);
+                showError('Connection error. Please check your internet and try again.');
             }
             
             showLoading(false);
         }
         
-        async function loadTotalQuestions() {
+        async function loadAllQuestions() {
+            const container = document.getElementById('questionsContainer');
+            container.innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p style="margin-top: 16px;">Loading questions...</p>
+                </div>
+            `;
+            
             try {
-                const response = await fetch(`${API_URL}?action=total`);
+                const response = await fetch(`${API_URL}?action=questions&start=0&limit=100`);
                 const data = await response.json();
-                if (data.success) {
-                    totalPages = Math.ceil(data.total / QUESTIONS_PER_PAGE);
+                
+                if (data.success && data.questions) {
+                    allQuestions = data.questions;
+                    totalPages = Math.ceil(allQuestions.length / QUESTIONS_PER_PAGE);
+                } else {
+                    throw new Error(data.message || 'Failed to load questions');
                 }
             } catch (error) {
-                console.error('Error loading total:', error);
+                console.error('Error loading questions:', error);
+                throw new Error('Failed to load questions. Please try again.');
             }
-        }
-        
-        async function loadAllQuestions() {
-            allQuestions = [];
-            let loaded = 0;
-            
-            for (let start = 0; start < 100; start += QUESTIONS_PER_PAGE) {
-                try {
-                    const response = await fetch(`${API_URL}?action=questions&start=${start}&limit=${QUESTIONS_PER_PAGE}`);
-                    const data = await response.json();
-                    
-                    if (data.success && data.questions.length) {
-                        allQuestions.push(...data.questions);
-                        loaded += data.questions.length;
-                        document.getElementById('loadProgress').innerHTML = `${Math.round((loaded / data.total) * 100)}%`;
-                        
-                        if (!data.hasMore) break;
-                    } else if (data.questions && data.questions.length === 0) {
-                        break;
-                    }
-                } catch (error) {
-                    console.error('Error loading chunk:', error);
-                }
-            }
-            
-            totalPages = Math.ceil(allQuestions.length / QUESTIONS_PER_PAGE);
         }
         
         // ==================== EXAM INITIALIZATION ====================
@@ -583,6 +553,8 @@ window.addEventListener('load', async function() {
         }
         
         function renderCurrentPage() {
+            if (!allQuestions.length) return;
+            
             const startIdx = currentPage * QUESTIONS_PER_PAGE;
             const endIdx = Math.min(startIdx + QUESTIONS_PER_PAGE, allQuestions.length);
             const pageQuestions = allQuestions.slice(startIdx, endIdx);
@@ -592,7 +564,6 @@ window.addEventListener('load', async function() {
             
             pageQuestions.forEach((q, idx) => {
                 const globalIdx = startIdx + idx;
-                const isSelected = userAnswers[q.id];
                 const selectedValue = userAnswers[q.id];
                 
                 const questionDiv = document.createElement('div');
@@ -618,12 +589,13 @@ window.addEventListener('load', async function() {
             
             // Update navigation buttons
             document.getElementById('prevBtn').disabled = currentPage === 0;
-            document.getElementById('nextBtn').disabled = currentPage >= totalPages - 1;
+            const nextBtn = document.getElementById('nextBtn');
             if (currentPage >= totalPages - 1) {
-                document.getElementById('nextBtn').textContent = 'Review All';
+                nextBtn.textContent = 'Review All';
             } else {
-                document.getElementById('nextBtn').textContent = 'Next ▶';
+                nextBtn.textContent = 'Next ▶';
             }
+            nextBtn.disabled = totalPages === 0;
             
             // Scroll to top
             window.scrollTo(0, 0);
@@ -646,9 +618,9 @@ window.addEventListener('load', async function() {
             if (currentPage < totalPages - 1) {
                 currentPage++;
                 renderCurrentPage();
-            } else {
+            } else if (currentPage === totalPages - 1) {
                 // On last page, scroll to submit button
-                document.querySelector('.submit-btn').scrollIntoView({ behavior: 'smooth' });
+                document.querySelector('.btn-danger').scrollIntoView({ behavior: 'smooth' });
             }
         }
         
@@ -699,7 +671,6 @@ window.addEventListener('load', async function() {
             
             if (timeLeft <= 300) {
                 timerElement.style.color = '#e74c3c';
-                timerElement.style.fontSize = '28px';
             }
         }
         
@@ -748,6 +719,12 @@ window.addEventListener('load', async function() {
                 if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'v' || e.key === 'x' || e.key === 'p')) {
                     e.preventDefault();
                     addViolation('Keyboard shortcut detected');
+                    return false;
+                }
+                // Prevent F12 and other dev tools
+                if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && e.key === 'I') || (e.ctrlKey && e.shiftKey && e.key === 'J')) {
+                    e.preventDefault();
+                    addViolation('Developer tools detected');
                     return false;
                 }
             });
@@ -956,8 +933,8 @@ window.addEventListener('load', async function() {
                     </div>
                 </div>
                 ${serverResponse.success ? 
-                    '<div style="background: #d4edda; color: #155724; padding: 12px; border-radius: 8px; text-align: center; margin-top: 16px;">✓ ' + serverResponse.message + '</div>' : 
-                    '<div style="background: #f8d7da; color: #721c24; padding: 12px; border-radius: 8px; text-align: center; margin-top: 16px;">⚠️ ' + serverResponse.message + '</div>'}
+                    '<div style="background: #d4edda; color: #155724; padding: 12px; border-radius: 8px; text-align: center; margin-top: 16px;">✓ ' + escapeHtml(serverResponse.message) + '</div>' : 
+                    '<div style="background: #f8d7da; color: #721c24; padding: 12px; border-radius: 8px; text-align: center; margin-top: 16px;">⚠️ ' + escapeHtml(serverResponse.message) + '</div>'}
             `;
             
             resultCard.classList.remove('hidden');
